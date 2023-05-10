@@ -372,7 +372,11 @@ static int prepare_tsock(struct parasite_ctl *ctl, pid_t pid,
 	struct sockaddr_un addr;
 
 	pr_info("Putting tsock into pid %d\n", pid);
-	args->h_addr_len = gen_parasite_saddr(&args->h_addr, getpid());
+	/*
+		TODO: when multiple parasite injections are done over a victim process,
+		there is socket address collition. Need to add a proper fix
+	*/
+	args->h_addr_len = gen_parasite_saddr(&args->h_addr, getpid() + rand());
 
 	ssock = ctl->ictx.sock;
 	sk_len = sizeof(addr);
