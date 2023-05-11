@@ -25,6 +25,7 @@
 #include "restorer.h"
 #include "infect-pie.h"
 
+#include <compel/plugins/plugin-fds.h>
 /*
  * PARASITE_CMD_DUMPPAGES is called many times and the parasite args contains
  * an array of VMAs at this time, so VMAs can be unprotected in any moment
@@ -65,6 +66,51 @@ static int mprotect_vmas(struct parasite_dump_pages_args *args)
 		mprotect_args = NULL;
 
 	return ret;
+}
+
+
+static int runMadvise(void *args) {
+	pr_warn("madvise at 0x%lx\n",*(long *)args);
+	sys_madvise (*(long *)args, 4096, MADV_DONTNEED);
+	return 0;
+}
+static int createAndSendUFFD(void) {
+        int uffd, ret,tsock;
+        if((uffd = sys_userfaultfd( O_CLOEXEC | O_NONBLOCK)) == -1) {
+                pr_err("could not create userfaultfd descriptor %d\n",uffd);
+                return -1;
+        }
+        pr_warn("initialized uffd %d\n", uffd);
+
+	tsock = parasite_get_rpc_sock();
+	ret = send_fd(tsock, NULL, 0, uffd);
+        //ret = fds_send_fd(uffd);
+        if(ret == 0) {
+                pr_warn("sent uffd\n");
+        }
+        else
+                pr_warn("could not send uffd\n");
+        sys_close(uffd);
+        return ret;
+}
+
+
+static int dump_single_page(void *args){
+
+	int p, ret, tsock;
+	int nr_segs =1;
+	tsock = parasite_get_rpc_sock();
+
+	p = recv_fd(tsock);
+
+	struct iovec miov;
+	miov.iov_base =*(long *)args;
+	miov.iov_len = 4096;
+	pr_err("vmsplice at = %lx\n",miov.iov_base);
+	ret = sys_vmsplice(p, &miov, nr_segs,	 SPLICE_F_GIFT | SPLICE_F_NONBLOCK);
+	pr_err("vmsplice ret = %d\n",ret);
+	return 0;
+
 }
 
 static int dump_pages(struct parasite_dump_pages_args *args)
@@ -690,6 +736,10 @@ int parasite_daemon_cmd(int cmd, void *args)
 	int ret;
 
 	switch (cmd) {
+	case PARASITE_CMD_DUMP_SINGLE:
+	//	pr_warn("---dump_single\n");
+		ret = dump_single_page(args);
+		break;
 	case PARASITE_CMD_DUMPPAGES:
 		ret = dump_pages(args);
 		break;
@@ -728,6 +778,13 @@ int parasite_daemon_cmd(int cmd, void *args)
 		break;
 	case PARASITE_CMD_DUMP_CGROUP:
 		ret = parasite_dump_cgroup(args);
+		break;
+	case PARASITE_CMD_STEAL_UFFD:
+		pr_warn("---steal_uffd\n");
+		ret = createAndSendUFFD();
+		break;
+	case PARASITE_CMD_RUN_MADVISE:
+		ret = runMadvise(args);
 		break;
 	default:
 		pr_err("Unknown command in parasite daemon thread leader: %d\n", cmd);
