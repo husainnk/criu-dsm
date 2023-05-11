@@ -28,16 +28,19 @@
 #define MAX_THREADS 64
 #define MAX_STRING 1024
 
+#define THREAD_STR(pid,tid) (tid==pid ? "main_thread" : "child_thread") 
+
 #define INDICATOR "__indicator"
 #define CHECK_MIGRATE "check_migrate"
 
+char bin_path[MAX_STRING];
 
 struct symbol_addresses {
     long indicator_addr;
     long check_migrate_addr;
 };
 
-
+pthread_barrier_t migration_pt_bar;
 static pthread_mutex_t lock;
 static volatile int flag = 0;
 static volatile int trace_done = 0;
@@ -199,6 +202,66 @@ char * read_section64(int32_t fd, Elf64_Shdr sh)
     return buff;
 } 
 
+int get_symbol_addr_single(const char *bin_path, const char *symbol,long *addrs)
+{
+    Elf32_Ehdr eh;
+    Elf64_Ehdr eh64;
+    Elf64_Shdr *sh_tbl;
+    Elf64_Sym *sym_tbl;
+    char *str_tbl;
+    int fd, i, j, symbol_count;
+    uint32_t str_tbl_ndx;
+
+    fd = open(bin_path, O_RDONLY|O_SYNC);
+    if(fd < 0) {
+        log_error("Unable to open file %s", bin_path);
+        return -1;
+    }
+
+    read_elf_header(fd, &eh);
+    if(!is_ELF(eh)) {
+        log_error("File %s is not an ELF file", bin_path);
+        return -1;
+    }
+
+    if(!is64Bit(eh)) {
+        log_error("Only 64-bit ELF files supported!");
+        return -1;
+    }
+
+    read_elf_header64(fd, &eh64);
+
+    sh_tbl = malloc(eh64.e_shentsize * eh64.e_shnum);
+    if(!sh_tbl) {
+        log_error("Coult not allocate memory for section header");
+    }
+
+    read_section_header_table64(fd, eh64, sh_tbl); 
+
+    for(i = 0; i < eh64.e_shnum; i++) {
+        if((sh_tbl[i].sh_type == SHT_SYMTAB) || \
+                (sh_tbl[i].sh_type == SHT_DYNSYM)) {
+            sym_tbl = (Elf64_Sym *)read_section64(fd, sh_tbl[i]);
+
+            str_tbl_ndx = sh_tbl[i].sh_link;
+            str_tbl = read_section64(fd, sh_tbl[str_tbl_ndx]);
+
+            symbol_count = sh_tbl[i].sh_size/sizeof(Elf64_Sym);
+
+            for(j = 0; j < symbol_count; j++) {
+                if(strcmp((str_tbl + sym_tbl[j].st_name), symbol) == 0)
+				{
+                    *addrs = sym_tbl[j].st_value;
+					return 0;
+				}
+            }
+        }
+    }
+   
+    return 0;
+}
+
+
 
 /*
  * Navigates through the symbol table of ELF binary pointed to by
@@ -273,6 +336,32 @@ struct tracee_info {
     long symbol_addr;
     int num_threads;
 };
+
+
+
+
+long get_regs_force(pid_t cpid, struct user_regs_struct *regs)
+{
+    long r,err;
+    struct iovec io;
+    io.iov_base = regs;
+    io.iov_len = sizeof(struct user_regs_struct);
+	//do{
+		r = ptrace(PTRACE_GETREGSET, cpid, (void *)NT_PRSTATUS, (void *)&io);
+	//}while( r == -1L && (errno == EBUSY || errno == EFAULT || errno == ESRCH) );
+
+	if(r < 0){
+		log_info("try attaching \n");
+        err = ptrace(PTRACE_ATTACH, cpid, NULL, NULL);
+		if(err<0)
+			log_info("Attach failed \n");
+        err = ptrace(PTRACE_SEIZE, cpid, NULL, NULL);
+		if(err<0)
+			log_info("Seize failed \n");
+		r = ptrace(PTRACE_GETREGSET, cpid, (void *)NT_PRSTATUS, (void *)&io);
+	}
+    return r;   
+}
 
 
 /* Uses ptrace to get the register values in an architecture
@@ -357,13 +446,19 @@ void remove_trap(pid_t pid, long addr)
  */
 void remove_breakpoint(pid_t cpid, unsigned long addr, unsigned long data, struct user_regs_struct *regs)
 {
+
+	log_info("remove_breakpoint : current ins at breakpoint 0x%x",ptrace(PTRACE_PEEKTEXT,cpid,(void *) addr, NULL));
     ptrace(PTRACE_POKETEXT, cpid, (void *)addr, (void *)data);
+	log_info("remove_breakpoint : ccurrent ins at breakpoint 0x%x",ptrace(PTRACE_PEEKTEXT,cpid,(void *) addr, NULL));
      struct iovec io;
     io.iov_base = regs;
     io.iov_len = sizeof(struct user_regs_struct);
 #ifdef __x86_64__
     regs->rip -= 1;
+#else
+    regs->pc -= 4;
 #endif
+
     ptrace(PTRACE_SETREGSET, cpid, (void *)NT_PRSTATUS, (void *)&io);
 }
 
@@ -377,24 +472,13 @@ void suspend(pid_t pid)
         log_error("SIGSTOP");
 }
 
-
-/*
- * To be called right after changing the __indicator value.
- * This is a method written to be utilized on a per tracee thread basis.
- * Each tracee thread is first waited on to be trapped by the compiler
- * placed breakpoint within the check_migrate function. Once hit, the main
- * thread is used to remove the compiler placed trap from the process 
- * address space and to restore the __indicator value. Once done, all threads
- * take turns to bring their tracee threads on the return address which also
- * is the migration point. Then the main thread suspends the process in that
- * state and exits.
- */
-void *trace_thread(void *argp)
+void *trace_child_thread(void *argp)
 {
     long err, data, brk_addr, indicator_addr, instr, ret_add_loc, ret_addr;
+	long _pthread_join_blocked;
     pid_t thread_id;
     pid_t pid;
-    struct user_regs_struct regs;
+    struct user_regs_struct regs, regs_pthread_rollback;
     int wait_status, flag_local, trace_done_local, num_threads;
 
     flag_local = 0;
@@ -406,54 +490,21 @@ void *trace_thread(void *argp)
     pid = info->pid;
     indicator_addr = info->symbol_addr;
     num_threads = info->num_threads;
-    
-    if(thread_id == pid){
-        
-        err = ptrace(PTRACE_ATTACH, pid, NULL, NULL);
-        if(err < 0) {
-            log_error("PTRACE_ATTACH failed");
-            return NULL;
-        }
-        log_info("PTRACE_ATTACH successful!");
+   
+	/* SEIZE the tracee thread */
+	err = ptrace(PTRACE_SEIZE, thread_id, NULL, NULL);
+	if(ptrace < 0) {
+		log_error("PTRACE_SEIZE failed for thread: %d", thread_id);
+		return NULL;
+	}
+	log_info("Thread %d seized1", thread_id);
 
-        waitpid(pid, &wait_status, 0);
-        if(WIFSTOPPED(wait_status))
-            log_info("Process %d got a signal: %s", pid, strsignal(WSTOPSIG(wait_status)));
-        else
-            log_error("Wait");
+	/* Wait for the compiler placed breakpoint to hit */
+	waitpid(thread_id, &wait_status, 0);
 
-        data = 1;
+	log_info("Thread %d: got signal %s - thread hit compiler based breakpoint", thread_id, \
+			strsignal(WSTOPSIG(wait_status)));
 
-        ptrace(PTRACE_POKEDATA, pid, indicator_addr, (void *)data); 
-        log_info("Putting value %ld", data);
-
-        data = ptrace(PTRACE_PEEKDATA, pid, indicator_addr, NULL);
-        log_info("Read data: %ld", data);
-
-        err = ptrace(PTRACE_CONT, pid, NULL, NULL);
-        if(err < 0)
-            log_error("PTRACE_CONT failed");
-        else
-            log_info("PTRACE_CONT successful");
-
-        waitpid(thread_id, &wait_status, 0);
-        log_info("Thread %d got signal %s", thread_id, strsignal(WSTOPSIG(wait_status)));
-    }
-
-    if(thread_id != pid) {
-        /* SEIZE the tracee thread */
-        err = ptrace(PTRACE_SEIZE, thread_id, NULL, NULL);
-        if(ptrace < 0) {
-            log_error("PTRACE_SEIZE failed for thread: %d", thread_id);
-            return NULL;
-        }
-        log_info("Thread %d seized", thread_id);
-
-        /* Wait for the compiler placed breakpoint to hit */
-        waitpid(thread_id, &wait_status, 0);
-        log_info("Thread %d: got signal %s", thread_id, \
-            strsignal(WSTOPSIG(wait_status)));
-    }
     err = get_regs(thread_id, &regs);
     if(err < 0) {
         log_error("Thread %d: failed to get register value", thread_id);
@@ -477,25 +528,9 @@ void *trace_thread(void *argp)
     brk_addr = regs.pc;
     regs.pc -= 4;
 #endif
-
-    /* main thread only. Remove compiler placed trap, restore indicator val*/
-    if(pid == thread_id) {
-        data = -1;
-        instr = ptrace(PTRACE_PEEKTEXT, thread_id, brk_addr, NULL);
-        log_info("Thread %d: addr: 0x%08lx opcode 0x%08lx", thread_id, \
-                brk_addr, instr);
-        remove_trap(pid, brk_addr);
-        log_info("Thread %d: trap removed!", thread_id);
-        err = ptrace(PTRACE_POKEDATA, pid, indicator_addr, (void *)data);
-        if(err < 0) {
-            log_error("Thread %d: could not restore indicator value!", thread_id);
-            return NULL;
-        }
-        log_info("Thread %d: indicator value restored!", thread_id);
-        pthread_mutex_lock(&lock);
-        flag = 1;
-        pthread_mutex_unlock(&lock);
-    }
+//	log_info("wait second_barrier");
+	pthread_barrier_wait(&migration_pt_bar);
+//	log_info("cleared second_barrier");
 
     /* Wait for main thread to remove compiler placed trap */
     while(flag_local == 0) {
@@ -515,62 +550,209 @@ void *trace_thread(void *argp)
     /* Take turns to get your tracee thread to the migration point */
     pthread_mutex_lock(&lock);
     data = set_breakpoint(thread_id, ret_addr);
+  
+	err = ptrace(PTRACE_CONT, thread_id, NULL, NULL);
+	if (err < 0){
+		log_error("Thread %d: PTRACE_CONT failed", thread_id);
+        return NULL;
+        pthread_mutex_unlock(&lock);
+    }
+    log_info("Thread %d: continuing", thread_id);
+    waitpid(thread_id, &wait_status, 0);
+    log_info("Thread %d: got signal %s", thread_id, \
+            strsignal(WSTOPSIG(wait_status)));
+#ifdef __x86_64__
+	regs.rip =0 ;
+#else 
+	regs.pc =0 ;
+#endif
+	err = get_regs(thread_id, &regs);     
+	if(err < 0) {
+        log_error("Thread %d: get regs failed", thread_id);
+        pthread_mutex_unlock(&lock);
+        return NULL;
+    }
+#ifdef __x86_64__
+    log_info("##### stopped at ip: 0x%x",regs.rip);
+#endif
+    remove_breakpoint(thread_id, ret_addr, data, &regs);
+    log_info("Thread %d: breakpoint removed--", thread_id);
 
-    err = ptrace(PTRACE_CONT, thread_id, NULL, NULL);
+    pthread_mutex_unlock(&lock);
+#ifdef __x86_64__
+	regs.rip =0 ;
+#else 
+	regs.pc =0 ;
+#endif
+
+	err = get_regs(thread_id, &regs);     
+	if(err < 0) {
+        log_error("Thread %d: get regs failed", thread_id);
+        pthread_mutex_unlock(&lock);
+        return NULL;
+    }
+#ifdef __x86_64__
+    log_info("##### stopped at ip: 0x%x",regs.rip);
+#endif
+	
+	//err = ptrace(PTRACE_DETACH, thread_id, NULL, NULL);
+	pthread_barrier_wait(&migration_pt_bar);
+
+    return NULL;
+}
+
+void *trace_main_thread(void *argp)
+{
+    long err, data, brk_addr, indicator_addr, instr, ret_add_loc, ret_addr;
+	long _pthread_join_blocked;
+    pid_t thread_id;
+    pid_t pid;
+    struct user_regs_struct regs, regs_pthread_rollback;
+    int wait_status, flag_local, trace_done_local, num_threads;
+
+    flag_local = 0;
+    trace_done_local = 0;
+
+    struct tracee_info *info = (struct tracee_info *)argp;
+
+    thread_id = info->thread_id;
+    pid = info->pid;
+    indicator_addr = info->symbol_addr;
+    num_threads = info->num_threads;
+    
+    /* 1. Attach to main thread  */   
+	err = ptrace(PTRACE_ATTACH, pid, NULL, NULL);
+	if(err < 0) {
+		log_error("PTRACE_ATTACH failed");
+            return NULL;
+        }
+	log_info("PTRACE_ATTACH successful!");
+	waitpid(pid, &wait_status, 0);
+    if(WIFSTOPPED(wait_status))
+		log_info("Process %d got a signal: %s", pid, strsignal(WSTOPSIG(wait_status)));
+	else
+		log_error("Wait");
+    
+    /* 2. change __indicato value  */   
+	data = 1;
+    ptrace(PTRACE_POKEDATA, pid, indicator_addr, (void *)data); 
+	log_info("Putting value %ld", data);
+	data = ptrace(PTRACE_PEEKDATA, pid, indicator_addr, NULL);
+	log_info("Read data: %ld", data);
+
+	long __pthread_join_enter__addr;
+	get_symbol_addr_single(bin_path,"__pthread_join_enter",&__pthread_join_enter__addr);
+	int pthread_join_enter__val = ptrace(PTRACE_PEEKDATA, pid, __pthread_join_enter__addr, NULL); 
+	log_info("Read data pthread_join_enter__val: %x", pthread_join_enter__val);	
+
+	pthread_barrier_wait(&migration_pt_bar);
+	/* 3. wait for the main thread to hit compiler breakpoint*/	
+
+	if(pthread_join_enter__val == 1)
+		err = ptrace(PTRACE_CONT, pid, NULL, SIGUSR1);
+	else
+		err = ptrace(PTRACE_CONT, pid, NULL, 0);
+	if(err < 0)
+		log_error("PTRACE_CONT failed");
+	else
+		log_info("PTRACE_CONT for main successful %d %d",pid,thread_id);
+
+	waitpid(thread_id, &wait_status, 0);
+	log_info("Thread main #1 %d got signal %s", thread_id, strsignal(WSTOPSIG(wait_status)));
+
+	
+
+	/* 4. get registers and */	
+
+	err = get_regs(thread_id, &regs);
+	if(err < 0) {
+		log_error("Thread %d: failed to get register value", thread_id);
+		return NULL;
+	}
+
+	/* Get the migration point info */
+#ifdef __x86_64__
+    log_info("Thread %d: RIP = 0x%08llx", thread_id, regs.rip);
+    log_info("Thread %d: RBP = 0x%08llx", thread_id, regs.rbp);
+    ret_add_loc = regs.rbp + 8;
+    regs.rip -= 1;
+    brk_addr = regs.rip;
+    ret_addr = ptrace(PTRACE_PEEKDATA, thread_id, (void *)ret_add_loc, NULL);
+    log_info("Thread %d: Value at BP+0x8: 0x%08lx", thread_id, ret_addr);
+#endif
+#ifdef __aarch64__
+    log_info("Thread %d: PC = 0x%08llx", thread_id, regs.pc);
+    log_info("Thread %d: x[30] = 0x%08llx", thread_id, regs.regs[30]);
+    ret_addr = regs.regs[30];
+    brk_addr = regs.pc;
+    regs.pc -= 4;
+#endif
+
+    /* main thread only. Remove compiler placed trap, restore indicator val*/
+	instr = ptrace(PTRACE_PEEKTEXT, thread_id, brk_addr, NULL);
+	log_info("Thread %d: addr: 0x%08lx opcode 0x%08lx", thread_id, \
+			brk_addr, instr);
+	remove_trap(pid, brk_addr);
+	log_info("Thread %d: trap removed!", thread_id);
+
+	data = -1;
+	err = ptrace(PTRACE_POKEDATA, pid, indicator_addr, (void *)data);
+	if(err < 0) {
+		log_error("Thread %d: could not restore indicator value!", thread_id);
+		return NULL;
+	}
+	log_info("Thread %d: indicator value restored!", thread_id);
+
+	pthread_mutex_lock(&lock);
+	flag = 1;
+	pthread_mutex_unlock(&lock);
+
+    err = set_regs(thread_id, &regs);
+    if(err < 0) {
+        log_error("Thread %d: failed to set register values", thread_id);
+        return NULL;
+    }
+    log_info("Thread %d: instruction pointer updated!", thread_id);
+
+    /* Take turns to get your tracee thread to the migration point i.e return address*/
+    pthread_mutex_lock(&lock);
+	// Set breakpoint at migration point
+    data = set_breakpoint(thread_id, ret_addr);
+  
+	err = ptrace(PTRACE_CONT, thread_id, NULL, NULL);
     if (err < 0){
         log_error("Thread %d: PTRACE_CONT failed", thread_id);
         return NULL;
         pthread_mutex_unlock(&lock);
     }
-    log_info("Thread %d: continuing", thread_id);
-    
     waitpid(thread_id, &wait_status, 0);
-    log_info("Thread %d: got signal %s", thread_id, \
-            strsignal(WSTOPSIG(wait_status)));
-
-    err = get_regs(thread_id, &regs);     
-    if(err < 0) {
+    log_info("Thread %d: got signal %s", thread_id,        strsignal(WSTOPSIG(wait_status)));
+	
+	// Remove breakpoint at migration point
+	err = get_regs(thread_id, &regs);     
+	if(err < 0) {
         log_error("Thread %d: get regs failed", thread_id);
         pthread_mutex_unlock(&lock);
         return NULL;
     }
-
     remove_breakpoint(thread_id, ret_addr, data, &regs);
-    log_info("Thread %d: breakpoint removed", thread_id);
+    log_info("Thread %d: breakpoint removed--", thread_id);
 
-    trace_done += 1;
     pthread_mutex_unlock(&lock);
 
-    /* Wait till all tracee threads are processed */
-    while(trace_done_local < num_threads) {
-        sched_yield();
-        pthread_mutex_lock(&lock);
-        trace_done_local = trace_done;
-        pthread_mutex_unlock(&lock);
-    }
+	// If the barrier is reached means all, threads are at migration point
+	pthread_barrier_wait(&migration_pt_bar);
+    log_info("Thread %d: all tracee threads processed! suspend **", thread_id);
 
-    log_info("Thread %d: all tracee threads processed!", thread_id);
-
-    /* Wait for the main thread to suspend the process */
-    while((pid != thread_id) && flag_local == 1) {
-        sched_yield();
-        pthread_mutex_lock(&lock);
-        flag_local = flag;
-        pthread_mutex_unlock(&lock);
-    }
-
-    /* If not main thread, exit from here */
-    if(pid != thread_id)
-        return NULL;
-
-    /* If main thread, suspend the process and then exit. */
+    /* suspend the process and then exit. */
     suspend(pid);
 
-    log_info("Thread %d: process suspended", thread_id);
+    log_info("Thread-Main %d: process suspended", thread_id);
 
     pthread_mutex_lock(&lock);
     flag = 0;
     pthread_mutex_unlock(&lock);
+	err = ptrace(PTRACE_DETACH, thread_id, NULL, NULL);
 
     return NULL;
 }
@@ -588,7 +770,6 @@ int main(int argc, char **argv)
     size_t num_threads;
     ssize_t ret;
     pid_t thread_id[MAX_THREADS];
-    char bin_path[MAX_STRING];
     struct symbol_addresses sa; 
     long data, r;
     struct tracee_info info[MAX_THREADS];
@@ -613,7 +794,6 @@ int main(int argc, char **argv)
 
     ret = get_binary_path(pid, bin_path, MAX_STRING);
     log_info("Binary path found: %s", bin_path);
-
     
     err  = get_symbol_addr(bin_path, INDICATOR, CHECK_MIGRATE, &sa);
     if(err < 0) {
@@ -625,8 +805,10 @@ int main(int argc, char **argv)
         log_info("Symbol %s address: 0x%08lx", CHECK_MIGRATE, sa.check_migrate_addr);
     }
 
-
     pthread_mutex_init(&lock, NULL);
+
+	log_info("num_threads: %ld\n",num_threads);
+	pthread_barrier_init(&migration_pt_bar,0,num_threads);
 
     for(i=0; i<num_threads; i++) {
         info[i].thread_id = thread_id[i];
@@ -634,14 +816,36 @@ int main(int argc, char **argv)
         info[i].symbol_addr = sa.indicator_addr;
         info[i].num_threads = num_threads;
 
-        pthread_create(&threads[i], NULL, trace_thread, (void *)&info[i]);
+		if(i==0)//main thread
+			pthread_create(&threads[i], NULL, trace_main_thread, (void *)&info[i]);
+		else 
+			pthread_create(&threads[i], NULL, trace_child_thread, (void *)&info[i]);
     }
 
     for(i=0; i <num_threads; i++) {
         pthread_join(threads[i], NULL);
     }
-
+	log_info("Tracer Exit\n");
     pthread_mutex_destroy(&lock);
-
+#if 0
+	//////////// POST //////////////
+	struct user_regs_struct regs;    
+    for(i=0; i<num_threads; i++) {
+	err = ptrace(PTRACE_ATTACH, thread_id[i], NULL, NULL);
+		if(err < 0 ){
+			log_error("pthread attach failed tid = %d",thread_id[i]);
+		}
+		else
+			log_info("pthread attach success tid = %d",thread_id[i]);
+//		int wait_status = 0;
+//		waitpid(thread_id[i], &wait_status, 0);
+		err = get_regs(thread_id[i], &regs);
+		if(err < 0) {
+			log_error("Thread %d: failed to get register value", thread_id[i]);
+			continue;
+		}
+//		 log_info("Thread %d: RIP = 0x%08llx", thread_id[i], regs.rip);
+	}
+#endif
     return 0;
 }
