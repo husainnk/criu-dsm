@@ -1011,11 +1011,16 @@ struct parasite_thread_ctl *compel_prepare_thread(struct parasite_ctl *ctl, int 
 
 static int prepare_thread(int pid, struct thread_ctx *ctx)
 {
-	if (ptrace(PTRACE_GETSIGMASK, pid, sizeof(k_rtsigset_t), &ctx->sigmask)) {
-		pr_perror("can't get signal blocking mask for %d", pid);
-		return -1;
-	}
 
+	// CRIU-DSM: Workaround when process reaches invalid state
+	while (1){
+		if (ptrace(PTRACE_GETSIGMASK, pid, sizeof(k_rtsigset_t), &ctx->sigmask)) {
+			pr_perror("can't get signal blocking mask for %d", pid);
+			sleep(1);
+			continue;
+		}
+		break;
+	}
 	if (ptrace_get_regs(pid, &ctx->regs)) {
 		pr_perror("Can't obtain registers (pid: %d)", pid);
 		return -1;
