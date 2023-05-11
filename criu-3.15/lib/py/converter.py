@@ -1017,6 +1017,7 @@ class Aarch64Converter(Converter):
             #delete old entry and add the new one
             del dest_core['entries'][0]['thread_info']
             dest_core['entries'][0]['ti_aarch64'] = dst_info
-            dest_core['entries'][0]['tc']['task_state'] = 1 #change task state to alive
+            #if 'tc' in dest_core['entries'][0]:
+            #    dest_core['entries'][0]['tc']['task_state'] = 1 #change task state to alive
             self.dump_image_file(self.dest_image_file_paths[CORE][i], dest_core)
             self.log('Core file template created')
