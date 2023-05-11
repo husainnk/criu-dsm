@@ -659,7 +659,7 @@ static void unseize_task_and_threads(const struct pstree_item *item, int st)
 	 * The st is the state we want to switch tasks into,
 	 * the item->state is the state task was in when we seized one.
 	 */
-
+/* CRIU: DSM - keep attached to the task
 	compel_resume_task(item->pid->real, item->pid->state, st);
 
 	if (st == TASK_DEAD)
@@ -668,6 +668,7 @@ static void unseize_task_and_threads(const struct pstree_item *item, int st)
 	for (i = 1; i < item->nr_threads; i++)
 		if (ptrace(PTRACE_DETACH, item->threads[i].real, NULL, NULL))
 			pr_perror("Unable to detach from %d", item->threads[i].real);
+*/
 }
 
 static void pstree_wait(struct pstree_item *root_item)
@@ -724,8 +725,8 @@ void pstree_switch_state(struct pstree_item *root_item, int st)
 	for_each_pstree_item(item)
 		unseize_task_and_threads(item, st);
 
-	if (st == TASK_DEAD)
-		pstree_wait(root_item);
+//	if (st == TASK_DEAD)
+//		pstree_wait(root_item);
 }
 
 static pid_t item_ppid(const struct pstree_item *item)
