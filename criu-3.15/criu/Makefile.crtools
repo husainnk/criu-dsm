@@ -13,6 +13,7 @@ obj-y			+= clone-noasan.o
 obj-y			+= cr-check.o
 obj-y			+= cr-dedup.o
 obj-y			+= cr-dump.o
+obj-y			+= cr-dsm.o
 obj-y			+= cr-errno.o
 obj-y			+= cr-restore.o
 obj-y			+= cr-service.o

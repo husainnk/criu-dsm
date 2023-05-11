@@ -125,8 +125,8 @@ ifeq ($(ASAN),1)
 endif
 
 ifneq ($(WERROR),0)
-        WARNINGS	+= -Werror
 endif
+        CFLAGS		+= -pthread
 
 ifeq ($(DEBUG),1)
         DEFINES		+= -DCR_DEBUG

@@ -14,7 +14,7 @@
 #include <sys/vfs.h>
 #include <sys/time.h>
 #include <sys/wait.h>
-
+#include <pthread.h>
 
 #include <sched.h>
 #include <sys/resource.h>
@@ -84,6 +84,9 @@
 #include "timens.h"
 #include "img-streamer.h"
 
+
+void start_dsm_server(struct pstree_item *root_item);
+struct vm_area_list *g_vma_area_list;
 /*
  * Architectures can overwrite this function to restore register sets that
  * are not covered by ptrace_set/get_regs().
@@ -466,6 +469,7 @@ err:
 	return ret;
 }
 
+
 static int dump_task_mm(pid_t pid, const struct proc_pid_stat *stat,
 		const struct parasite_dump_misc *misc,
 		const struct vm_area_list *vma_area_list,
@@ -479,6 +483,7 @@ static int dump_task_mm(pid_t pid, const struct proc_pid_stat *stat,
 	pr_info("Dumping mm (pid: %d)\n", pid);
 	pr_info("----------------------------------------\n");
 
+	pr_info("%d\n", vma_area_list->nr);
 	mme.n_vmas = vma_area_list->nr;
 	mme.vmas = xmalloc(mme.n_vmas * sizeof(VmaEntry *));
 	if (!mme.vmas)
@@ -1216,6 +1221,8 @@ err_cure:
 	goto err_free;
 }
 
+
+
 static int dump_one_task(struct pstree_item *item, InventoryEntry *parent_ie)
 {
 	pid_t pid = item->pid->real;
@@ -1432,7 +1439,12 @@ static int dump_one_task(struct pstree_item *item, InventoryEntry *parent_ie)
 	exit_code = 0;
 err:
 	close_pid_proc();
-	free_mappings(&vmas);
+	pr_info("CRIU DSM: save vma mappaings\n");
+/*
+        free_mappings(&vmas);
+*/
+	g_vma_area_list = (struct vm_area_list *) malloc(sizeof(struct vm_area_list));
+	memcpy (g_vma_area_list, &vmas, sizeof (struct vm_area_list));
 	xfree(dfds);
 	return exit_code;
 
@@ -1754,7 +1766,9 @@ static int cr_dump_finish(int ret)
 			    (ret || post_dump_ret) ?
 			    TASK_ALIVE : opts.final_state);
 	timing_stop(TIME_FROZEN);
+/*
 	free_pstree(root_item);
+*/
 	seccomp_free_entries();
 	free_file_locks();
 	free_link_remaps();
@@ -1770,6 +1784,10 @@ static int cr_dump_finish(int ret)
 		write_stats(DUMP_STATS);
 		pr_info("Dumping finished successfully\n");
 	}
+
+	pr_info("no of VMAs: %d\n",g_vma_area_list->nr);
+	start_dsm_server(root_item);
+
 	return post_dump_ret ? : (ret != 0);
 }
 
