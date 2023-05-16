@@ -24,3 +24,11 @@
     printf(RESET); \
 };
 
+
+#define RED_PRINTF(f_, ...)                                                                            \
+{                                                                                                 \
+    printf(RED) ;\
+    printf((f_), ##__VA_ARGS__);                                                                  \
+    printf(RESET); \
+};
+

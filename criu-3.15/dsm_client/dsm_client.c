@@ -375,7 +375,7 @@ static void *handler(void *arg)
 				if (ioctl(p->uffd, UFFDIO_WRITEPROTECT, &prms))
 					perror("write_protect\n");
 				FT_PRINTF("write flag cleared\n");
-				page_list_data[addr_to_index(addr)].state = PAGE_MODIFIED;
+				set_page_status(addr,PAGE_MODIFIED);
 				if(uffd_interrupted)
 					FT_PRINTF(".........UFFD_INTERRUPTED..........\n");
 			}
@@ -403,15 +403,19 @@ static void *handler(void *arg)
 						FT_PRINTF("%03d ",page_content[i]);
 					FT_PRINTF("\n");
 
-				page_list_data[addr_to_index(addr)].state = PAGE_SHARED;
-		}
-		 fault_in_progress = 0;
-		uffd_interrupted=0;
-	}
-//	pthread_mutex_unlock(&page_list_data[addr_to_index(addr)].mutex);
-	FT_PRINTF("####### Fault END\n");
+				if(is_write)
+					set_page_status(addr,PAGE_MODIFIED);
+				else
+					set_page_status(addr,PAGE_SHARED);
 
-    }
+			}
+			fault_in_progress = 0;
+			uffd_interrupted=0;
+		}
+		//	pthread_mutex_unlock(&page_list_data[addr_to_index(addr)].mutex);
+		FT_PRINTF("####### Fault END\n");
+
+	}
 
     return NULL;
 }
@@ -501,6 +505,14 @@ void simulate_page_invalidation(int pid){
 
 }
 
+int get_page_status(long addr){
+	return  page_list_data[addr_to_index(addr)].state;
+}
+
+void set_page_status(long addr,int state){
+	page_list_data[addr_to_index(addr)].state = state;
+}
+
 void handle_invalidate_page(struct msg_info *dsm_msg,int pid){
 
 	int state;
@@ -544,7 +556,7 @@ void handle_invalidate_page(struct msg_info *dsm_msg,int pid){
 		err_and_ret("Can't run parasite command 1");
 	printf("madvise Success for %llx\n", dsm_msg->page_addr);
 	
-//	page_list_data[addr_to_index(dsm_msg->page_addr)].state = PAGE_INVALID;
+	set_page_status(dsm_msg->page_addr,PAGE_INVALID);
 
 	if(compel_stop_daemon(ctl))
 		printf("Can't stop daeomon\n");
@@ -721,7 +733,7 @@ void handle_page_data_request(int pid,struct msg_info *dsm_msg,int uffd){
         send(page_data_socket,page_content,4096,0);
         printf("page_transfer_complete\n");
 	if(dsm_msg->msg_type == MSG_GET_PAGE_DATA_INVALID){
-		page_list_data[addr_to_index(dsm_msg->page_addr)].state = PAGE_INVALID;
+		set_page_status(dsm_msg->page_addr,PAGE_INVALID);
                 printf("Drop the page: \n");
 		ret = compel_rpc_call_sync(EXEC_MADVISE, ctl);
                 if (ret < 0) 
@@ -730,7 +742,7 @@ void handle_page_data_request(int pid,struct msg_info *dsm_msg,int uffd){
         }else // TO SHARED
 	{
                 change_to_wp( dsm_msg->page_addr,uffd); 
-		page_list_data[addr_to_index(dsm_msg->page_addr)].state = PAGE_SHARED;
+		set_page_status(dsm_msg->page_addr,PAGE_SHARED);
 	}
 
         val = compel_stop_daemon(ctl);
@@ -747,6 +759,7 @@ void handle_page_data_request(int pid,struct msg_info *dsm_msg,int uffd){
 void listen_for_commands(int sock,int pid,int uffd){
 
 	int msg_served=-1,val;
+
 	kill(pid,SIGCONT);
 
 	for(;;){
@@ -754,16 +767,13 @@ void listen_for_commands(int sock,int pid,int uffd){
 		msg_served++;
 
 		unsigned char ack = 0x10;
-		printf("Waiting for message, msg_served:%d\n",msg_served);
+		RED_PRINTF("Waiting for message, msg_served:%d\n",msg_served);
 		int valread = read(page_data_socket, &dsm_msg, sizeof(struct msg_info));
 
-                if(valread <0)
-                        { 
-				printf("invalid read \n");
-				 exit(1);
-			}
-		else
-			printf("valread %d %d\n",valread, sizeof(struct msg_info));
+                if(valread <0){ 
+			printf("invalid read \n");
+			exit(1);
+		}
 
                 switch(dsm_msg.msg_type){
 
@@ -773,7 +783,7 @@ void listen_for_commands(int sock,int pid,int uffd){
 			case MSG_GET_PAGE_DATA_INVALID:
 				printf("[MSG] MSG_GET_PAGE_DATA 0x%llx\n",dsm_msg.page_addr );
 				pthread_mutex_lock(&page_list_data[addr_to_index(dsm_msg.page_addr)].mutex);
-				if(page_list_data[addr_to_index(dsm_msg.page_addr)].state == PAGE_INVALID)
+				if(get_page_status(dsm_msg.page_addr) == PAGE_INVALID)
 				{
 					printf("FATAL Page dropped already\n");
 				}
@@ -784,6 +794,12 @@ void listen_for_commands(int sock,int pid,int uffd){
 			case MSG_INVALIDATE_PAGE:
 				uffd_interrupted = 1;
 				printf("[MSG] MSG_INVALIDATE_PAGE 0x%llx\n",dsm_msg.page_addr );
+				if(get_page_status(dsm_msg.page_addr) == PAGE_INVALID)
+				{
+					printf("Page dropped already\n");
+					send(page_data_socket,&ack,1,0);
+					break;
+				}
 				pthread_mutex_lock(&page_list_data[addr_to_index(dsm_msg.page_addr)].mutex);
 				handle_invalidate_page(&dsm_msg,pid);
 				pthread_mutex_unlock(&page_list_data[addr_to_index(dsm_msg.page_addr)].mutex);
