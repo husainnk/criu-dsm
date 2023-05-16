@@ -32,6 +32,7 @@
 #include "../compel/include/infect-priv.h"
 #include "parsemap.h"
 #include "config.h"
+#include "dsm_log.h"
 
 
 #define err_and_ret(msg) do { fprintf(stderr, msg);  return -1; } while (0)
@@ -239,7 +240,7 @@ static int get_page_data_from_origin(int sock,long addr,unsigned char *page_cont
 
 	while(data_read < page_size){
 		int ret = read(sock,page_content + data_read,page_size);
-		printf("page_read ret=%d\n",ret);
+		FT_PRINTF("page_read ret=%d\n",ret);
 		if(ret == 0)
 			exit(0);
 		data_read += ret;
@@ -289,7 +290,7 @@ static void *handler(void *arg)
 
 		int readres = read(p->uffd, &msg, sizeof(msg));
 		uffd_interrupted = 0;
-		printf("####### Fault START\n");
+		FT_PRINTF("####### Fault START\n");
 
 		if (readres == -1) {
 			if (errno == EAGAIN)
@@ -313,15 +314,15 @@ static void *handler(void *arg)
 
 			if(msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP)
 			{
-				printf("fault for write-protect 0x%llx\n",addr);
+				FT_PRINTF("fault for write-protect 0x%llx\n",addr);
 /*
 				if(page_list_data[addr_to_index(addr)].state == PAGE_INVALID ){
-					printf("--------------- $$$$$$$$ PAGE_INVALID\n");
+					FT_PRINTF("--------------- $$$$$$$$ PAGE_INVALID\n");
 					bool is_write = 1;
-					printf("fault for over missing page %llx , writefault : %d\n",(long long)addr,is_write);
+					FT_PRINTF("fault for over missing page %llx , writefault : %d\n",(long long)addr,is_write);
 					unsigned char page_content[page_size];
 					get_page_data_from_origin(p->sock,addr,page_content,is_write);
-					printf("got the page\n");
+					FT_PRINTF("got the page\n");
 
 					struct uffdio_copy copy;
 					copy.src = (long long)page_content;
@@ -346,13 +347,13 @@ static void *handler(void *arg)
 				read(p->sock, &ack,1);
 				if(ack == 0x89)
 				{
-					printf("Page server says owner changed, we need to get the updated page");
+					FT_PRINTF("Page server says owner changed, we need to get the updated page");
 					int data_read = 0;
 					
 					unsigned char page_content[4096];
 					while(data_read < page_size){
 						int ret = read(p->sock,page_content+data_read,page_size);
-						printf("#3 ret=%d\n",ret);
+						FT_PRINTF("#3 ret=%d\n",ret);
 						if(ret == 0)
 							exit(0);
 						data_read += ret;
@@ -365,29 +366,27 @@ static void *handler(void *arg)
 					if (ioctl(p->uffd, UFFDIO_COPY, &copy) == -1) {
 						perror("ioctl/copy");
 					}
-					printf(".........page write........\n");
-					for(int i=0x26;i<0x30;i++)
-						printf("%03d ",page_content[i]);
-					printf("\n");
-					printf("updated special page request\n");
+					FT_PRINTF(".........page write........\n");
+					for(int i=0x00;i<0x30;i++)
+						FT_PRINTF("%03d ",page_content[i]);
+					FT_PRINTF("\n");
+					FT_PRINTF("updated special page request\n");
 				}
 				if (ioctl(p->uffd, UFFDIO_WRITEPROTECT, &prms))
 					perror("write_protect\n");
-				printf("write flag cleared\n");
+				FT_PRINTF("write flag cleared\n");
 				page_list_data[addr_to_index(addr)].state = PAGE_MODIFIED;
-
-
 				if(uffd_interrupted)
-					printf(".........UFFD_INTERRUPTED..........\n");
+					FT_PRINTF(".........UFFD_INTERRUPTED..........\n");
 			}
 
 			else {
 				//	pthread_mutex_lock(&mutex);
 				bool is_write =  msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WRITE;
-				printf("fault for missing page %llx , writefault : %d\n",(long long)addr,is_write);
+				FT_PRINTF("fault for missing page %llx , writefault : %d\n",(long long)addr,is_write);
 				unsigned char page_content[page_size];
 				get_page_data_from_origin(p->sock,addr,page_content,is_write);
-				printf("got the page\n");
+				FT_PRINTF("got the page\n");
 
 				struct uffdio_copy copy;
 				copy.src = (long long)page_content;
@@ -399,10 +398,10 @@ static void *handler(void *arg)
 					perror("ioctl/copy");
 					//exit(1);
 				}
-				printf("@@~~~~~~ page write ~~~~~~~~\n");
-					for(int i=0x26;i<0x30;i++)
-						printf("%03d ",page_content[i]);
-					printf("\n");
+				FT_PRINTF("@@~~~~~~ page write ~~~~~~~~\n");
+					for(int i=0x00;i<0x30;i++)
+						FT_PRINTF("%03d ",page_content[i]);
+					FT_PRINTF("\n");
 
 				page_list_data[addr_to_index(addr)].state = PAGE_SHARED;
 		}
@@ -410,7 +409,7 @@ static void *handler(void *arg)
 		uffd_interrupted=0;
 	}
 //	pthread_mutex_unlock(&page_list_data[addr_to_index(addr)].mutex);
-	printf("####### Fault END\n");
+	FT_PRINTF("####### Fault END\n");
 
     }
 
@@ -460,7 +459,7 @@ void send_page_invalidate_msg(long addr,int sock){
 
         struct msg_info dsm_msg;
 
-        printf("send_page_invalidate_msg :%lx\n",addr);
+        FT_PRINTF("send_page_invalidate_msg :%lx\n",addr);
         dsm_msg.msg_type = MSG_INVALIDATE_PAGE;
         dsm_msg.page_addr = addr;
 
@@ -511,9 +510,7 @@ void handle_invalidate_page(struct msg_info *dsm_msg,int pid){
 
 	if(fault_in_progress && dsm_msg->page_addr == fault_in_progress_addr){
 
-		printf("@@@@@@@@@@@@ fault int prrogress for %lx",fault_in_progress_addr);
-		//unsigned char ack = 0x10;
-		//send(page_data_socket,&ack,1,0);
+		printf("@@@@@@@@@@@@ fault int prrogress for %lx\n",fault_in_progress_addr);
 		return ;
 	}
 	printf("=>invaldate page %lx\n",dsm_msg->page_addr);
@@ -715,7 +712,7 @@ void handle_page_data_request(int pid,struct msg_info *dsm_msg,int uffd){
         //Read from parsite pip
         read(p[0], page_content,4096);
 
-	printf(".....................\n");
+	printf("..................... 0x%lx\n",dsm_msg->page_addr);
         for(i=0x00;i<0x30;i++){
                 printf("%03d ",page_content[i]);
 	}
