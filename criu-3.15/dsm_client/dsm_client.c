@@ -95,6 +95,7 @@ enum page_state{
 
 
 volatile int fault_in_progress = 0;
+volatile long fault_in_progress_addr = 0;
 volatile int uffd_interrupted = 0;
 static volatile int stop;
 procmaps_iterator* maps;
@@ -303,6 +304,7 @@ static void *handler(void *arg)
 		}
 
 		fault_in_progress = 1;
+		fault_in_progress_addr = msg.arg.pagefault.address;
 		long long addr = msg.arg.pagefault.address;
 //		pthread_mutex_lock(&page_list_data[addr_to_index(addr)].mutex);
 		unsigned char ack ;
@@ -465,7 +467,8 @@ void send_page_invalidate_msg(long addr,int sock){
         send(sock,&dsm_msg,sizeof(struct msg_info),0);
 }
 
-void invalidate_page(long *addr,int length,int pid,	struct parasite_ctl *ctl){
+
+void invalidate_restored_pages(long *addr,int length,int pid,	struct parasite_ctl *ctl){
 
 	int state;
 	struct infect_ctx *ictx;
@@ -476,11 +479,14 @@ void invalidate_page(long *addr,int length,int pid,	struct parasite_ctl *ctl){
 
 	for( int i=0;i<total_pages;i++)
 	{
-		*arg = 	page_list_data[i].saddr ;
-		if (compel_rpc_call_sync(EXEC_MADVISE, ctl))
-			err_and_ret("Can't run parasite command 1");
-		printf("madvise Success for %llx\n", *arg);
-		page_list_data[i].state = PAGE_INVALID;
+		if( page_list_data[i].saddr >= 0x800000 && page_list_data[i].saddr <= 0x801000)
+		{
+			*arg = 	page_list_data[i].saddr ;
+			if (compel_rpc_call_sync(EXEC_MADVISE, ctl))
+				err_and_ret("Can't run parasite command 1");
+			printf("madvise Success for %llx\n", *arg);
+			page_list_data[i].state = PAGE_INVALID;
+		}
 	}
 
 }
@@ -503,6 +509,13 @@ void handle_invalidate_page(struct msg_info *dsm_msg,int pid){
 	struct infect_ctx *ictx;
 	long *arg;
 
+	if(fault_in_progress && dsm_msg->page_addr == fault_in_progress_addr){
+
+		printf("@@@@@@@@@@@@ fault int prrogress for %lx",fault_in_progress_addr);
+		//unsigned char ack = 0x10;
+		//send(page_data_socket,&ack,1,0);
+		return ;
+	}
 	printf("=>invaldate page %lx\n",dsm_msg->page_addr);
 	compel_log_init(print_vmsg, COMPEL_LOG_DEBUG);
 
@@ -701,13 +714,13 @@ void handle_page_data_request(int pid,struct msg_info *dsm_msg,int uffd){
 
         //Read from parsite pip
         read(p[0], page_content,4096);
-/*
+
 	printf(".....................\n");
-        for(i=0x26;i<0x30;i++){
+        for(i=0x00;i<0x30;i++){
                 printf("%03d ",page_content[i]);
 	}
         printf("\n");
-*/
+
         send(page_data_socket,page_content,4096,0);
         printf("page_transfer_complete\n");
 	if(dsm_msg->msg_type == MSG_GET_PAGE_DATA_INVALID){
@@ -849,7 +862,8 @@ static int do_infection(int pid ,int sock)
 	int success=0;
 	struct uffdio_register uffdio_register;	
 	int i;
-	//invalidate_page(NULL,total_pages,pid,ctl);
+	invalidate_restored_pages(NULL,total_pages,pid,ctl);
+
 
 	procmaps_struct* maps_tmp=NULL;
 	
