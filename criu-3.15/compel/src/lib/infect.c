@@ -315,7 +315,7 @@ int compel_resume_task(pid_t pid, int orig_st, int st)
 {
 	int ret = 0;
 
-	pr_debug("\tUnseizing %d into %d\n", pid, st);
+	//pr_debug("\tUnseizing %d into %d\n", pid, st);
 
 	if (st == COMPEL_TASK_DEAD) {
 		kill(pid, SIGKILL);
@@ -371,7 +371,7 @@ static int prepare_tsock(struct parasite_ctl *ctl, pid_t pid,
 	socklen_t sk_len;
 	struct sockaddr_un addr;
 
-	pr_info("Putting tsock into pid %d\n", pid);
+	//pr_info("Putting tsock into pid %d\n", pid);
 	args->h_addr_len = gen_parasite_saddr(&args->h_addr, getpid());
 
 	ssock = ctl->ictx.sock;
@@ -527,8 +527,8 @@ static int parasite_trap(struct parasite_ctl *ctl, pid_t pid,
 	}
 
 	if (WSTOPSIG(status) != SIGTRAP || siginfo.si_code != ARCH_SI_TRAP) {
-		pr_debug("** delivering signal %d si_code=%d\n",
-			 siginfo.si_signo, siginfo.si_code);
+		//pr_debug("** delivering signal %d si_code=%d\n",
+		//	 siginfo.si_signo, siginfo.si_code);
 
 		pr_err("Unexpected %d task interruption, aborting\n", pid);
 		goto err;
@@ -648,7 +648,7 @@ static int parasite_init_daemon(struct parasite_ctl *ctl)
 	if (compel_util_send_fd(ctl, ctl->ictx.log_fd))
 		goto err;
 
-	pr_info("Wait for parasite being daemonized...\n");
+	////pr_info("Wait for parasite being daemonized...\n");
 
 	if (parasite_wait_ack(ctl->tsock, PARASITE_CMD_INIT_DAEMON, &m)) {
 		pr_err("Can't switch parasite %d to daemon mode %d\n",
@@ -658,7 +658,7 @@ static int parasite_init_daemon(struct parasite_ctl *ctl)
 
 	ctl->sigreturn_addr = (void*)(uintptr_t)args->sigreturn_addr;
 	ctl->daemonized = true;
-	pr_info("Parasite %d has been switched to daemon mode\n", pid);
+	//pr_info("Parasite %d has been switched to daemon mode\n", pid)
 	return 0;
 err:
 	return -1;
@@ -804,7 +804,7 @@ static int parasite_memfd_exchange(struct parasite_ctl *ctl, unsigned long size)
 	parasite_memfd_close(ctl, fd);
 	close(lfd);
 
-	pr_info("Set up parasite blob using memfd\n");
+	//pr_info("Set up parasite blob using memfd\n");
 	return 0;
 
 err_curef:
@@ -862,7 +862,7 @@ static int compel_map_exchange(struct parasite_ctl *ctl, unsigned long size)
 
 	ret = parasite_memfd_exchange(ctl, size);
 	if (ret == 1) {
-		pr_info("MemFD parasite doesn't work, goto legacy mmap\n");
+		//pr_info("MemFD parasite doesn't work, goto legacy mmap\n");
 		ret = parasite_mmap_exchange(ctl, size);
 	}
 	return ret;
@@ -931,7 +931,7 @@ int compel_infect(struct parasite_ctl *ctl, unsigned long nr_threads, unsigned l
 	if (ret)
 		goto err;
 
-	pr_info("Putting parasite blob into %p->%p\n", ctl->local_map, ctl->remote_map);
+	//pr_info("Putting parasite blob into %p->%p\n", ctl->local_map, ctl->remote_map);
 
 	ctl->parasite_ip = (unsigned long)(ctl->remote_map + ctl->pblob.hdr.parasite_ip_off);
 	ctl->cmd = ctl->local_map + ctl->pblob.hdr.cmd_off;
@@ -1112,7 +1112,7 @@ static int make_sock_for(int pid)
 	int ret, mfd, fd, sk = -1;
 	char p[32];
 
-	pr_debug("Preparing seqsk for %d\n", pid);
+	//pr_debug("Preparing seqsk for %d\n", pid);
 
 	sprintf(p, "/proc/%d/ns/net", pid);
 	fd = open(p, O_RDONLY);
@@ -1294,13 +1294,13 @@ static int parasite_fini_seized(struct parasite_ctl *ctl)
 		return -1;
 	}
 
-	pr_debug("Waiting for %d to trap\n", pid);
+	//pr_debug("Waiting for %d to trap\n", pid);
 	if (wait4(pid, &status, __WALL, NULL) != pid) {
 		pr_perror("Waited pid mismatch (pid: %d)", pid);
 		return -1;
 	}
 
-	pr_debug("Daemon %d exited trapping\n", pid);
+	//pr_debug("Daemon %d exited trapping\n", pid);
 	if (!WIFSTOPPED(status)) {
 		pr_err("Task is still running (pid: %d)\n", pid);
 		return -1;
@@ -1480,7 +1480,7 @@ int compel_stop_pie(pid_t pid, void *addr, enum trace_flags *tf, bool no_bp)
 	int ret;
 
 	if (no_bp) {
-		pr_debug("Force no-breakpoints restore\n");
+		//pr_debug("Force no-breakpoints restore\n");
 		ret = 0;
 	} else
 		ret = ptrace_set_breakpoint(pid, addr);
@@ -1536,8 +1536,8 @@ static inline int is_required_syscall(user_regs_struct_t *regs, pid_t pid,
 	const char *mode = user_regs_native(regs) ? "native" : "compat";
 	int req_sysnr = user_regs_native(regs) ? sys_nr : sys_nr_compat;
 
-	pr_debug("%d (%s) is going to execute the syscall %lu, required is %d\n",
-		pid, mode, REG_SYSCALL_NR(*regs), req_sysnr);
+	//pr_debug("%d (%s) is going to execute the syscall %lu, required is %d\n",
+	//	pid, mode, REG_SYSCALL_NR(*regs), req_sysnr);
 
 	return (REG_SYSCALL_NR(*regs) == req_sysnr);
 }
@@ -1571,11 +1571,11 @@ int compel_stop_on_syscall(int tasks,
 		if (!task_is_trapped(status, pid))
 			return -1;
 
-		pr_debug("%d was trapped\n", pid);
+		//pr_debug("%d was trapped\n", pid);
 
 		if (trace == TRACE_EXIT) {
 			trace = TRACE_ENTER;
-			pr_debug("`- Expecting exit\n");
+			//pr_debug("`- Expecting exit\n");
 			goto goon;
 		}
 		if (trace == TRACE_ENTER)
@@ -1607,7 +1607,7 @@ int compel_stop_on_syscall(int tasks,
 			if (!task_is_trapped(status, pid))
 				return -1;
 
-			pr_debug("%d was stopped\n", pid);
+			//pr_debug("%d was stopped\n", pid);
 			tasks--;
 			continue;
 		}

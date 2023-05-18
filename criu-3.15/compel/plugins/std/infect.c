@@ -51,8 +51,8 @@ static int __parasite_daemon_reply_ack(unsigned int cmd, int err)
 		return -1;
 	}
 
-	pr_debug("__sent ack msg: %d %d %d\n",
-		 m.cmd, m.ack, m.err);
+	//pr_debug("__sent ack msg: %d %d %d\n",
+	//	 m.cmd, m.ack, m.err);
 
 	return 0;
 }
@@ -61,7 +61,7 @@ static int __parasite_daemon_wait_msg(struct ctl_msg *m)
 {
 	int ret;
 
-	pr_debug("Daemon waits for command\n");
+	//pr_debug("Daemon waits for command\n");
 
 	while (1) {
 		*m = (struct ctl_msg){ };
@@ -72,8 +72,8 @@ static int __parasite_daemon_wait_msg(struct ctl_msg *m)
 			return -1;
 		}
 
-		pr_debug("__fetched msg: %d %d %d\n",
-			 m->cmd, m->ack, m->err);
+		//pr_debug("__fetched msg: %d %d %d\n",
+		//  m->cmd, m->ack, m->err);
 		return 0;
 	}
 
@@ -94,8 +94,8 @@ static int fini(void)
 	parasite_cleanup();
 
 	new_sp = (long)sigframe + RT_SIGFRAME_OFFSET(sigframe);
-	pr_debug("%ld: new_sp=%lx ip %lx\n", sys_gettid(),
-		  new_sp, RT_SIGFRAME_REGIP(sigframe));
+	//pr_debug("%ld: new_sp=%lx ip %lx\n", sys_gettid(),
+	//	  new_sp, RT_SIGFRAME_REGIP(sigframe));
 
 	sys_close(tsock);
 	std_log_set_fd(-1);
@@ -112,7 +112,7 @@ static noinline __used int noinline parasite_daemon(void *args)
 	struct ctl_msg m;
 	int ret = -1;
 
-	pr_debug("Running daemon thread leader\n");
+	//pr_debug("Running daemon thread leader\n");
 
 	/* Reply we're alive */
 	if (__parasite_daemon_reply_ack(PARASITE_CMD_INIT_DAEMON, 0))
@@ -212,7 +212,7 @@ int __used __parasite_entry parasite_service(void)
 	unsigned int cmd = __export_parasite_service_cmd;
 	void *args = __export_parasite_service_args_ptr;
 
-	pr_info("Parasite cmd %d/%x process\n", cmd, cmd);
+	//pr_info("Parasite cmd %d/%x process\n", cmd, cmd);
 
 	if (cmd == PARASITE_CMD_INIT_DAEMON)
 		return parasite_init_daemon(args);
