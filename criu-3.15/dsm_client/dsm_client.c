@@ -392,13 +392,14 @@ static void *handler(void *arg)
 				copy.src = (long long)page_content;
 				copy.dst = (long long)addr;
 				copy.len = page_size;
-				copy.mode = 0;
+				// if it is write fault means, allow writing. if read fault, set writeprotect
 				copy.mode = is_write ? 0 : UFFDIO_COPY_MODE_WP;
+//				copy.mode = is_write ? UFFDIO_COPY_MODE_WP: 0;
 				if (ioctl(p->uffd, UFFDIO_COPY, &copy) == -1) {
 					perror("ioctl/copy");
 					//exit(1);
 				}
-				FT_PRINTF("@@~~~~~~ page write ~~~~~~~~\n");
+				FT_PRINTF("@@~~~~~~ page write ~~~~~~~~ copy_mode=%d\n",copy.mode);
 					for(int i=0x00;i<0x30;i++)
 						FT_PRINTF("%03d ",page_content[i]);
 					FT_PRINTF("\n");
@@ -523,7 +524,7 @@ void handle_invalidate_page(struct msg_info *dsm_msg,int pid){
 	if(fault_in_progress && dsm_msg->page_addr == fault_in_progress_addr){
 
 		printf("@@@@@@@@@@@@ fault int prrogress for %lx\n",fault_in_progress_addr);
-		return ;
+//		return ;
 	}
 	printf("=>invaldate page %lx\n",dsm_msg->page_addr);
 	compel_log_init(print_vmsg, COMPEL_LOG_DEBUG);
@@ -774,6 +775,7 @@ void listen_for_commands(int sock,int pid,int uffd){
 			printf("invalid read \n");
 			exit(1);
 		}
+		RED_PRINTF("msg_id: %d\n",dsm_msg.msg_id);
 
                 switch(dsm_msg.msg_type){
 
