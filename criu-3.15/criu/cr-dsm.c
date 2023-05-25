@@ -186,13 +186,6 @@ void send_page_invalidate_msg(long addr,int fd){
 	write(fd,&dsm_msg,sizeof(struct msg_info));
 }
 
-static void print_vmsg(unsigned int lvl, const char *fmt, va_list parms)
-{
-	printf("\tLC%u: ", lvl);
-	vprintf(fmt, parms);
-}
-
-
 void setup_connections(int *remote_uffd_server_fd,int *remote_msg_server_fd){
 
 	int new_socket, valread;
@@ -843,6 +836,30 @@ int addr_to_index(long long addr){
 }
 
 
+void grab_and_forward_page(int *r_usock, int *r_msock,int page_owner,int remote_id, long addr){
+
+
+	int data_read=0;
+	struct msg_info dsm_msg;
+	unsigned char page_content[4096] = {0};
+
+	dsm_msg.page_addr  = addr;
+	dsm_msg.msg_type = MSG_GET_PAGE_DATA_INVALID;
+
+
+	send(r_msock[page_owner],&dsm_msg,sizeof(dsm_msg),0);
+	while(data_read < page_size){
+		int ret = read((int)r_msock[page_owner],page_content+data_read,page_size);
+		printf("[remote page read] page data ret=%d\n",ret);
+		data_read += ret;
+	}
+	send(r_usock[remote_id],page_content,4096,0);
+	printf("page from remote %d to %d remote complete\n",page_owner,remote_id);
+
+
+}
+
+
 int broadcast_invalidate_page(long page_addr , int remote_id,int *r_msock ,int  n_remote_threads){
 	
 
@@ -1055,7 +1072,8 @@ void start_dsm_server(struct pstree_item *item)
 
 					set_page_state(dsm_msg.page_addr,PAGE_MODIFIED);
 					set_page_owner(dsm_msg.page_addr,0);
-					page_list_data[addr_to_index(dsm_msg.page_addr)].shared_owners = 0;
+					set_page_sh_owners(dsm_msg.page_addr,0);
+
 					invalidate_in_progress  = 0;
 
 					print_page_status(dsm_msg.page_addr);
@@ -1085,7 +1103,7 @@ void start_dsm_server(struct pstree_item *item)
 						broadcast_uffd_get_page_invalidate(dsm_msg.page_addr,r_msock);
 						set_page_state(dsm_msg.page_addr,PAGE_MODIFIED);
 					        set_page_owner(dsm_msg.page_addr,0);
-						page_list_data[addr_to_index(dsm_msg.page_addr)].shared_owners = 0;	
+						set_page_sh_owners(dsm_msg.page_addr,0);
 					}
 					print_page_status(dsm_msg.page_addr);
 					
@@ -1143,17 +1161,23 @@ void start_dsm_server(struct pstree_item *item)
 				case MSG_INVALIDATE_PAGE:
 					printf("REMOTE %s remote_id=%d %lx\n",msg_str[dsm_msg.msg_type],remote_id,dsm_msg.page_addr);
 					int shared_owners = get_page_sh_owners(dsm_msg.page_addr);
+					int page_owner = get_page_owner(dsm_msg.page_addr);
 #if 1
+
 					if(get_page_state(dsm_msg.page_addr) == PAGE_MODIFIED)
 					{
 						printf("========> Page is not shared cur_own=%d\n",get_page_owner(dsm_msg.page_addr));
 						ack = 0x89;
 						send(r_usock[remote_id],&ack,1,0);
 						// ?? what if remote is not owner
-						special_page_data_request(item->threads[0].real,r_usock[remote_id],dsm_msg.page_addr,item);
-
+						if(page_owner ==0)
+							special_page_data_request(item->threads[0].real,r_usock[remote_id],dsm_msg.page_addr,item);
+						else{
+							grab_and_forward_page(r_usock,r_msock,page_owner,remote_id,dsm_msg.page_addr);
+						}
 						set_page_state(dsm_msg.page_addr,PAGE_MODIFIED);
 						set_page_owner(dsm_msg.page_addr,remote_id);
+						set_page_sh_owners(dsm_msg.page_addr,0);
 						
 						print_page_status(dsm_msg.page_addr);
 						break;
@@ -1178,6 +1202,7 @@ void start_dsm_server(struct pstree_item *item)
 
 					set_page_state(dsm_msg.page_addr,PAGE_MODIFIED);
 					set_page_owner(dsm_msg.page_addr,remote_id);
+					set_page_sh_owners(dsm_msg.page_addr,0);
 
 					print_page_status(dsm_msg.page_addr);
 					break;
@@ -1192,22 +1217,9 @@ void start_dsm_server(struct pstree_item *item)
 					{ 
 						printf("<<<<<<<<<Remote thread owns data>>>>>>>>\n");
 						assert(remote_id != page_owner);
-					        send(r_msock[page_owner],&dsm_msg,sizeof(dsm_msg),0);	
-						int data_read=0;
-						unsigned char page_content[4096] = {0};
-						while(data_read < page_size){
-							int ret = read((int)r_msock[page_owner],page_content+data_read,page_size);
-							printf("[remote page read] page data ret=%d\n",ret);
-							data_read += ret;
-						}
-						send(r_usock[remote_id],page_content,4096,0);
-						printf("page from remote %d to %d remote complete\n",page_owner,remote_id);
-						if( MSG_GET_PAGE_DATA_INVALID)
-							page_list_data[addr_to_index(dsm_msg.page_addr)].owner = remote_id;
-						break;	
-					}
-
-					handle_page_data_request(item->threads[0].real,r_usock[remote_id],&dsm_msg,item);
+						grab_and_forward_page(r_usock,r_msock,page_owner,remote_id,dsm_msg.page_addr);
+					}else
+						handle_page_data_request(item->threads[0].real,r_usock[remote_id],&dsm_msg,item);
 					
 					if(dsm_msg.msg_type == MSG_GET_PAGE_DATA) //shared
 					{
@@ -1218,7 +1230,7 @@ void start_dsm_server(struct pstree_item *item)
 					else{ //modified
 						set_page_state(dsm_msg.page_addr,PAGE_MODIFIED);
 						set_page_owner(dsm_msg.page_addr,remote_id);
-						page_list_data[addr_to_index(dsm_msg.page_addr)].shared_owners = 0;
+						set_page_sh_owners(dsm_msg.page_addr,0);
 					}
 					print_page_status(dsm_msg.page_addr);
 
