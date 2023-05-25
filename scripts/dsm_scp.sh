@@ -15,8 +15,10 @@ host=$2
 
 cd ~/${app}
 
-time ~/print_ip.sh ${app} ${app} ;
-time sudo python3 /users/nkhusain/TransProc_c/criu-3.15/crit/crit  recode . ./aarch64/ aarch64 ${app} ./bin/ y 
+#time ~/print_ip.sh ${app} ${app} ;
+#time sudo python3 /users/nkhusain/TransProc_c/criu-3.15/crit/crit  recode . ./aarch64/ aarch64 ${app} ./bin/ y 
+
+sudo rm -r aarch64/ ; mkdir aarch64; cp *.img  aarch64/
 ssh ${host} -C "rm -r ~/aarch64; sudo killall -9 ${app}" ;  
 scp -r ./aarch64 ${host}:
 
@@ -26,9 +28,20 @@ then
 	exit
 fi
 echo "========Transfer to  3rd Node====="
-ssh $3 -C "rm -r ~/aarch64/*.img; sudo killall -9 dsm_write; mkdir ~/aarch64/" ; 
+ssh $3 -C "rm -r ~/aarch64/*.img; sudo killall -9 $app; mkdir ~/aarch64/" ; 
 scp  -r *.img ${3}:~/aarch64/
 
-ssh $4 -C "rm -r ~/aarch64/*.img; sudo killall -9 dsm_write; mkdir ~/aarch64/" ; 
+if [ -z "${4}" ];
+then
+	exit
+fi
+ssh $4 -C "rm -r ~/aarch64/*.img; sudo killall -9 $app; mkdir ~/aarch64/" ; 
 scp  -r *.img ${4}:~/aarch64/
 
+if [ -z "${5}" ];
+then
+	exit
+fi
+
+ssh $5 -C "rm -r ~/aarch64/*.img; sudo killall -9 $app; mkdir ~/aarch64/" ; 
+scp  -r *.img ${5}:~/aarch64/

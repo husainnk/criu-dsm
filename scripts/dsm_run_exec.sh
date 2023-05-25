@@ -1,7 +1,5 @@
 
 
-
-
 start_dump(){
 
 	sleep 2;
@@ -21,4 +19,6 @@ fi
 app=$1 
 
 start_dump &
-sudo killall -9 $app  ; sudo rm -r *.img ; sudo ./$app  
+sudo killall -9 $app  ; sudo rm -r *.img ;
+
+# sudo ./$app  
