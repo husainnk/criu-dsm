@@ -21,6 +21,7 @@ cd ~/${app}
 sudo rm -r aarch64/ ; mkdir aarch64; cp *.img  aarch64/
 ssh ${host} -C "rm -r ~/aarch64; sudo killall -9 ${app}" ;  
 scp -r ./aarch64 ${host}:
+ssh ${2} -C "echo 1 > /tmp/cmd"
 
 
 if [ -z "${3}" ];
@@ -30,6 +31,7 @@ fi
 echo "========Transfer to  3rd Node====="
 ssh $3 -C "rm -r ~/aarch64/*.img; sudo killall -9 $app; mkdir ~/aarch64/" ; 
 scp  -r *.img ${3}:~/aarch64/
+ssh ${3} -C "echo 1 > /tmp/cmd"
 
 if [ -z "${4}" ];
 then
@@ -37,6 +39,7 @@ then
 fi
 ssh $4 -C "rm -r ~/aarch64/*.img; sudo killall -9 $app; mkdir ~/aarch64/" ; 
 scp  -r *.img ${4}:~/aarch64/
+ssh ${4} -C "echo 1 > /tmp/cmd"
 
 if [ -z "${5}" ];
 then
@@ -45,3 +48,4 @@ fi
 
 ssh $5 -C "rm -r ~/aarch64/*.img; sudo killall -9 $app; mkdir ~/aarch64/" ; 
 scp  -r *.img ${5}:~/aarch64/
+ssh ${5} -C "echo 1 > /tmp/cmd"

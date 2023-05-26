@@ -836,7 +836,7 @@ int addr_to_index(long long addr){
 }
 
 
-void grab_and_forward_page(int *r_usock, int *r_msock,int page_owner,int remote_id, long addr){
+void grab_and_forward_page(int *r_usock, int *r_msock,int page_owner,int remote_id, long addr,int msg_type){
 
 
 	int data_read=0;
@@ -844,18 +844,19 @@ void grab_and_forward_page(int *r_usock, int *r_msock,int page_owner,int remote_
 	unsigned char page_content[4096] = {0};
 
 	dsm_msg.page_addr  = addr;
-	dsm_msg.msg_type = MSG_GET_PAGE_DATA_INVALID;
+	dsm_msg.msg_type = msg_type;
 
 
 	send(r_msock[page_owner],&dsm_msg,sizeof(dsm_msg),0);
 	while(data_read < page_size){
 		int ret = read((int)r_msock[page_owner],page_content+data_read,page_size);
 		printf("[remote page read] page data ret=%d\n",ret);
+		if(ret == -1 || ret == 0)
+			exit(0);
 		data_read += ret;
 	}
 	send(r_usock[remote_id],page_content,4096,0);
 	printf("page from remote %d to %d remote complete\n",page_owner,remote_id);
-
 
 }
 
@@ -991,7 +992,7 @@ void start_dsm_server(struct pstree_item *item)
 	struct pollfd  *fds= (struct pollfd *)malloc(sizeof(struct pollfd) * no_of_fds);
 	for(;;){
 		val = ptrace(PTRACE_CONT,item->threads[0].real, NULL, NULL);
-		pr_info("PTRACE_CONT %d\n",val);
+	//	pr_info("PTRACE_CONT %d\n",val);
 
 		
 		fds[0].fd = p[0];
@@ -1169,11 +1170,10 @@ void start_dsm_server(struct pstree_item *item)
 						printf("========> Page is not shared cur_own=%d\n",get_page_owner(dsm_msg.page_addr));
 						ack = 0x89;
 						send(r_usock[remote_id],&ack,1,0);
-						// ?? what if remote is not owner
 						if(page_owner ==0)
 							special_page_data_request(item->threads[0].real,r_usock[remote_id],dsm_msg.page_addr,item);
 						else{
-							grab_and_forward_page(r_usock,r_msock,page_owner,remote_id,dsm_msg.page_addr);
+							grab_and_forward_page(r_usock,r_msock,page_owner,remote_id,dsm_msg.page_addr, MSG_GET_PAGE_DATA_INVALID);
 						}
 						set_page_state(dsm_msg.page_addr,PAGE_MODIFIED);
 						set_page_owner(dsm_msg.page_addr,remote_id);
@@ -1217,7 +1217,8 @@ void start_dsm_server(struct pstree_item *item)
 					{ 
 						printf("<<<<<<<<<Remote thread owns data>>>>>>>>\n");
 						assert(remote_id != page_owner);
-						grab_and_forward_page(r_usock,r_msock,page_owner,remote_id,dsm_msg.page_addr);
+		
+						grab_and_forward_page(r_usock,r_msock,page_owner,remote_id,dsm_msg.page_addr,dsm_msg.msg_type);
 					}else
 						handle_page_data_request(item->threads[0].real,r_usock[remote_id],&dsm_msg,item);
 					
