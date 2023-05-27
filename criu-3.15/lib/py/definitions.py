@@ -88,6 +88,9 @@ class StHandle:
         if cs:
             return cs[0]
         else:
+            for c in self.call_sites_addr:
+                if(address - c.addr < 6):
+                    return c
             return None
 
     def get_call_site_from_id(self, id):
