@@ -110,6 +110,7 @@
 #define arch_export_unmap_compat	__export_unmap_compat
 #endif
 
+int saved_pid=-1;
 struct pstree_item *current;
 
 static int restore_task_with_children(void *);
@@ -1411,6 +1412,7 @@ static inline int fork_with_pid(struct pstree_item *item)
 
 	BUG_ON(ca.clone_flags & CLONE_VM);
 
+	saved_pid = pid;
 	pr_info("Forking task with %d pid (flags 0x%lx)\n", pid, ca.clone_flags);
 
 	if (ca.item->ids)
@@ -2192,6 +2194,38 @@ static int write_restored_pid(void)
 	return 0;
 }
 
+int check_pipe_file(void);
+void start_dsm_client(int);
+
+int check_pipe_file(){
+
+        if (access("/tmp/pipe_client", F_OK) == 0) {
+                return 1;
+        } else {
+		pr_perror("File Not Found\n");
+                return 0;
+        }
+
+}
+
+void start_dsm_client(int pid){
+
+	int fd,ret;
+	char msg[20];
+
+	sprintf(msg,"%d",pid);
+
+	pr_info("Starting DSM Client :%s\n",msg);
+	if(!check_pipe_file())
+		return;
+
+        fd = open("/tmp/pipe_client", O_WRONLY);
+
+        ret = write(fd, msg, strlen(msg)+1);
+	pr_info("Starting DSM Client, Write to pipe:%s %d\n",msg,ret);
+        close(fd);
+}
+
 static int restore_root_task(struct pstree_item *init)
 {
 	enum trace_flags flag = TRACE_ALL;
@@ -2436,6 +2470,7 @@ skip_ns_bouncing:
 		goto out_kill_network_unlocked;
 
 	pr_info("Restore finished successfully. Tasks resumed.\n");
+	start_dsm_client(saved_pid);
 	write_stats(RESTORE_STATS);
 
 	/* This has the effect of dismissing the image streamer */

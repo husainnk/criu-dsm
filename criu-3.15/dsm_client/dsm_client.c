@@ -948,7 +948,23 @@ int main(int argc, char **argv)
 	int pid,sock;
 	int uffd;
 
-	pid = atoi(argv[1]);
+	if(argc < 2){
+		printf("Usage: %s <pid>\n",argv[0]);
+	}
+
+	if(argc == 3)
+	{
+		char msg[25];
+		int fd = open("/tmp/pipe_client", O_RDONLY);
+		read(fd, msg, sizeof(msg));
+		printf("FIFO: %s\n", msg);
+		pid = atoi(msg);
+		close(fd);
+
+	}
+	else{
+		pid = atoi(argv[1]);
+	}
 
 	/*Get VMA Areas*/
 	maps = pmparser_parse(pid);
