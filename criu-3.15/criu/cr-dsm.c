@@ -929,6 +929,16 @@ void broadcast_uffd_get_page_invalidate(long addr ,int *r_msock){
 
 }
 
+void start_scp(){
+
+	char msg[] = "START";
+	check_pipe_file();
+	
+	int fd = open("/tmp/pipe_scp", O_WRONLY);
+        write(fd, msg, strlen(msg)+1);
+        close(fd);
+}
+
 
 void start_dsm_server(struct pstree_item *item)
 {
@@ -943,6 +953,8 @@ void start_dsm_server(struct pstree_item *item)
 	int n_remote_threads;
 
 	main_pid = item->threads[0].real;
+	
+	start_scp();	
 
 	uffd = stealUFFD(main_pid,item);
 
@@ -1242,6 +1254,18 @@ void start_dsm_server(struct pstree_item *item)
 	}// for
 
 }
+
+int check_pipe_file(){
+
+        if (access("/tmp/pipe_scp", F_OK) == 0) {
+                return 1;
+        } else {
+		pr_perror("Pipe File Not Found\n");
+                exit(0);
+        }
+
+}
+
 
 procmaps_iterator* pmparser_parse(int pid){
 	procmaps_iterator* maps_it = malloc(sizeof(procmaps_iterator));
