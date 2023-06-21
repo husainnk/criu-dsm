@@ -34,6 +34,7 @@ ssh -o StrictHostKeyChecking=no ${CHOST}  'bash -s'  <<EOT
 	sudo apt update
 	sudo apt install -y zsh libprotobuf-dev libprotobuf-c-dev protobuf-c-compiler protobuf-compiler python-protobuf \
 	pkg-config libnl-3-dev libnet-dev libcap-dev libbsd-dev python3-pip cmake make libncurses-dev git g++ python3 flex  bison bc  build-essential cmake   libedit-dev python zlib1g-dev rsync wget libelf-dev libssl-dev dwarves
+	sudo apt install -y libprotobuf-dev libprotobuf-c-dev protobuf-c-compiler protobuf-compiler python3-protobuf libbsd-dev libcap-dev libnet1-dev libnl-3-dev pkg-config
 	python3 -m pip install pyelftools jsonpath-ng pyro4 psutil scp protobuf==3.20 capstone keystone keystone-engine  ip-address
 
 	git clone https://github.com/husainnk/thread_migrater.git
