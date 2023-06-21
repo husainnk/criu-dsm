@@ -29,7 +29,7 @@ def inf(opts):
 
 def outf(opts):
     if opts['out']:
-        return open(opts['out'], 'w+')
+        return open(opts['out'], 'wb+')
     else:
         return sys.stdout
 
