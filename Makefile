@@ -2,6 +2,7 @@
 
 all:
 	make -C criu-3.15 -j$(shell nproc)
+	make -C criu-3.15/dsm_client
 	make -C tools
 
 vdso:
