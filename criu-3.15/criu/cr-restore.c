@@ -2216,7 +2216,7 @@ void start_dsm_client(int pid){
 	sprintf(msg,"%d",pid);
 
 	pr_info("Starting DSM Client :%s\n",msg);
-	if(!check_pipe_file())
+	if(!check_pipe_client_file())
 		return;
 
         fd = open("/tmp/pipe_client", O_WRONLY);

@@ -1,4 +1,4 @@
 
 
-#define SERVER_ADDR  "128.110.217.74"
+#define SERVER_ADDR  "10.2.0.100"
 

@@ -34,6 +34,7 @@
 #include "config.h"
 #include "dsm_log.h"
 
+#include "../criu/user.h"
 
 #define err_and_ret(msg) do { fprintf(stderr, msg);  return -1; } while (0)
 

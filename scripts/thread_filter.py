@@ -10,9 +10,7 @@ import json
 
 
 
-#python3 ~/TransProc/criu-3.15/crit/crit show pstree.img
-
-CRIT_PATH ="/users/nkhusain/criu-dsm/criu-3.15/crit/crit"
+CRIT_PATH =os.path.expanduser('~') + "/criu-dsm/criu-3.15/crit/crit"
 img =  "pstree.img"
 TARGET_THREAD = int(sys.argv[1])
 

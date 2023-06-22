@@ -17,6 +17,9 @@
 #include "parasite.h"
 #include "../compel/include/infect-priv.h"
 #include "dsm_log.h"
+
+#include "user.h"
+
 #ifndef COMPEL_ARCH_SYSCALL_TYPES_H__
 #define COMPEL_ARCH_SYSCALL_TYPES_H__
 
