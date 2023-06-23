@@ -23,7 +23,7 @@ sudo rm -r aarch64/ ; mkdir aarch64; cp *.img  aarch64/
 #### Remote Node 1
 ssh ${host} -C "rm -r ~/aarch64; sudo killall -9 ${app}" ;  
 scp -r ./aarch64 ${host}:
-ssh ${2} -C "echo ${app} > /tmp/cmd"
+ssh ${host} -C "echo ${app} > /tmp/cmd"
 
 
 if [ -z "${3}" ];
