@@ -44,6 +44,9 @@
 #define SECCOMP_MODE_DISABLED 0
 #endif
 
+
+int g_create_rand_socket_id=0;
+
 static int prepare_thread(int pid, struct thread_ctx *ctx);
 
 static inline void close_safe(int *pfd)
@@ -375,7 +378,11 @@ static int prepare_tsock(struct parasite_ctl *ctl, pid_t pid,
                 TODO: when multiple parasite injections are done over a victim process,
                 there is socket address collition. Need to add a proper fix
         */
-        args->h_addr_len = gen_parasite_saddr(&args->h_addr, getpid() );
+	if(g_create_rand_socket_id)
+		args->h_addr_len = gen_parasite_saddr(&args->h_addr, getpid()  + rand());
+	else
+		args->h_addr_len = gen_parasite_saddr(&args->h_addr, getpid());
+
 
 	ssock = ctl->ictx.sock;
 	sk_len = sizeof(addr);

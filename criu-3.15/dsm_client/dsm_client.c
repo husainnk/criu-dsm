@@ -45,6 +45,8 @@
 #define EXEC_MADVISE PARASITE_USER_CMDS+1
 #define DUMP_SINGLE_PAGE PARASITE_USER_CMDS+2
 
+extern int g_create_rand_socket_id;
+
 struct params {
     int uffd;
     long page_size;
@@ -966,6 +968,8 @@ int main(int argc, char **argv)
 	else{
 		pid = atoi(argv[1]);
 	}
+
+	g_create_rand_socket_id=1;
 
 	/*Get VMA Areas*/
 	maps = pmparser_parse(pid);
